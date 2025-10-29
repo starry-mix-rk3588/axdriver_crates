@@ -6,6 +6,9 @@
 #[cfg(feature = "fxmac")]
 /// fxmac driver for PhytiumPi
 pub mod fxmac;
+#[cfg(feature = "gmac")]
+/// GMAC driver for RK3588
+pub mod gmac;
 #[cfg(feature = "ixgbe")]
 /// ixgbe NIC device driver.
 pub mod ixgbe;
