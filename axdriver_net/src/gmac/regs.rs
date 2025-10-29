@@ -2,7 +2,7 @@
 //!
 //! This module provides register offsets, bit definitions, and safe access methods
 //! for the Synopsys DesignWare Ethernet MAC 4.20a controller used in RK3588 SoC.
-
+#![allow(unused)]
 /// MAC Configuration Register offsets (Base + 0x0000)
 pub const MAC_CONFIGURATION: usize = 0x0000;
 pub const MAC_FRAME_FILTER: usize = 0x0004;

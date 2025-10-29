@@ -1,7 +1,7 @@
 //! GMAC (Gigabit MAC) driver for RK3588 SoC
 //!
-//! This driver implements the network device interface for the Synopsys DesignWare
-//! Ethernet MAC 4.20a controller used in Rockchip RK3588 SoC.
+//! This driver implements the network device interface for the Synopsys
+//! DesignWare Ethernet MAC 4.20a controller used in Rockchip RK3588 SoC.
 //!
 //! # Features
 //! - Single queue mode (Queue 0)
@@ -30,25 +30,23 @@ extern crate alloc;
 mod desc;
 mod regs;
 
-use alloc::boxed::Box;
-use alloc::collections::VecDeque;
-use alloc::sync::Arc;
-use alloc::vec;
+// re-exported utilities used locally
 use alloc::vec::Vec;
-use core::ptr::NonNull;
-use core::sync::atomic::{AtomicBool, Ordering};
+use alloc::{collections::VecDeque, sync::Arc};
+use core::sync::atomic::AtomicBool;
 
 use axdriver_base::{BaseDriverOps, DevError, DevResult, DeviceType};
+use desc::{RxDesc, TxDesc};
 use log::*;
+use regs::*;
 
 use crate::{EthernetAddress, NetBuf, NetBufBox, NetBufPool, NetBufPtr, NetDriverOps};
-use desc::{RxDesc, TxDesc};
-use regs::*;
 
 /// Platform-specific kernel functions trait
 ///
 /// This trait must be implemented by the platform integration layer
 /// to provide memory management and address translation services.
+#[crate_interface::def_interface]
 pub trait KernelFunc {
     /// Convert virtual address to physical address
     fn virt_to_phys(addr: usize) -> usize;
@@ -96,7 +94,7 @@ pub struct GmacNic {
     /// TX descriptor ring
     tx_desc_ring: &'static mut [TxDesc],
     /// TX descriptor physical address (for cleanup)
-    tx_desc_paddr: usize,
+    _tx_desc_paddr: usize,
     /// TX descriptor pages count (for cleanup)
     tx_desc_pages: usize,
     /// TX buffer tracking (for reclaim)
@@ -109,7 +107,7 @@ pub struct GmacNic {
     /// RX descriptor ring
     rx_desc_ring: &'static mut [RxDesc],
     /// RX descriptor physical address (for cleanup)
-    rx_desc_paddr: usize,
+    _rx_desc_paddr: usize,
     /// RX descriptor pages count (for cleanup)
     rx_desc_pages: usize,
     /// RX buffer pool for zero-copy operation
@@ -131,6 +129,14 @@ pub struct GmacNic {
     #[allow(dead_code)]
     pending_tx: AtomicBool,
 }
+
+// For compatibility with other drivers in this tree we mark the NIC as
+// Send + Sync similarly to `FXmacNic` which also used `unsafe impl` in this
+// repository. The safety assumption here is that all internal mutations are
+// properly synchronized by the upper layers (or performed in a single-thread
+// context). This is a pragmatic choice for the initial driver implementation.
+unsafe impl Sync for GmacNic {}
+unsafe impl Send for GmacNic {}
 
 impl GmacNic {
     /// Initialize GMAC driver
@@ -211,16 +217,16 @@ impl GmacNic {
         // Step 3: Allocate TX descriptor ring
         let tx_desc_size = core::mem::size_of::<TxDesc>() * TX_RING_SIZE;
         let tx_desc_pages = (tx_desc_size + PAGE_SIZE - 1) / PAGE_SIZE;
-        let (tx_desc_vaddr, tx_desc_paddr) = KernelFunc::dma_alloc_coherent(tx_desc_pages);
+        let (tx_desc_vaddr, tx_desc_paddr) =
+            crate_interface::call_interface!(KernelFunc::dma_alloc_coherent(tx_desc_pages));
 
         if tx_desc_vaddr == 0 || tx_desc_paddr == 0 {
             error!("GMAC: Failed to allocate TX descriptor ring");
             return Err(DevError::NoMemory);
         }
 
-        let tx_desc_ring = unsafe {
-            core::slice::from_raw_parts_mut(tx_desc_vaddr as *mut TxDesc, TX_RING_SIZE)
-        };
+        let tx_desc_ring =
+            unsafe { core::slice::from_raw_parts_mut(tx_desc_vaddr as *mut TxDesc, TX_RING_SIZE) };
 
         info!(
             "GMAC: TX ring allocated: vaddr={:#x}, paddr={:#x}, size={}",
@@ -230,17 +236,20 @@ impl GmacNic {
         // Step 4: Allocate RX descriptor ring
         let rx_desc_size = core::mem::size_of::<RxDesc>() * RX_RING_SIZE;
         let rx_desc_pages = (rx_desc_size + PAGE_SIZE - 1) / PAGE_SIZE;
-        let (rx_desc_vaddr, rx_desc_paddr) = KernelFunc::dma_alloc_coherent(rx_desc_pages);
+        let (rx_desc_vaddr, rx_desc_paddr) =
+            crate_interface::call_interface!(KernelFunc::dma_alloc_coherent(rx_desc_pages));
 
         if rx_desc_vaddr == 0 || rx_desc_paddr == 0 {
             error!("GMAC: Failed to allocate RX descriptor ring");
-            KernelFunc::dma_free_coherent(tx_desc_vaddr, tx_desc_pages);
+            crate_interface::call_interface!(KernelFunc::dma_free_coherent(
+                tx_desc_vaddr,
+                tx_desc_pages
+            ));
             return Err(DevError::NoMemory);
         }
 
-        let rx_desc_ring = unsafe {
-            core::slice::from_raw_parts_mut(rx_desc_vaddr as *mut RxDesc, RX_RING_SIZE)
-        };
+        let rx_desc_ring =
+            unsafe { core::slice::from_raw_parts_mut(rx_desc_vaddr as *mut RxDesc, RX_RING_SIZE) };
 
         info!(
             "GMAC: RX ring allocated: vaddr={:#x}, paddr={:#x}, size={}",
@@ -269,10 +278,10 @@ impl GmacNic {
         // Step 7: Initialize RX descriptors (chained mode, pre-allocate buffers)
         let mut rx_buffers = Vec::with_capacity(RX_RING_SIZE);
         for i in 0..RX_RING_SIZE {
-            let buf = rx_buf_pool
-                .alloc_boxed()
-                .ok_or(DevError::NoMemory)?;
-            let buf_paddr = KernelFunc::virt_to_phys(buf.raw_buf().as_ptr() as usize) as u32;
+            let buf = rx_buf_pool.alloc_boxed().ok_or(DevError::NoMemory)?;
+            let buf_paddr = crate_interface::call_interface!(KernelFunc::virt_to_phys(
+                buf.raw_buf().as_ptr() as usize
+            )) as u32;
 
             let next_desc_paddr = if i == RX_RING_SIZE - 1 {
                 rx_desc_paddr as u32 // Wrap to first descriptor
@@ -337,13 +346,17 @@ impl GmacNic {
             base_vaddr,
             mac_addr,
             tx_desc_ring,
-            tx_desc_paddr,
+            _tx_desc_paddr: tx_desc_paddr,
             tx_desc_pages,
-            tx_buffers: vec![None; TX_RING_SIZE],
+            tx_buffers: {
+                let mut tb = Vec::with_capacity(TX_RING_SIZE);
+                tb.resize_with(TX_RING_SIZE, || None);
+                tb
+            },
             tx_head: 0,
             tx_tail: 0,
             rx_desc_ring,
-            rx_desc_paddr,
+            _rx_desc_paddr: rx_desc_paddr,
             rx_desc_pages,
             rx_buf_pool,
             rx_buffers,
@@ -384,11 +397,15 @@ impl GmacNic {
 
 impl BaseDriverOps for GmacNic {
     fn device_name(&self) -> &str {
-        "rk3588-gmac"
+        "gmac"
     }
 
     fn device_type(&self) -> DeviceType {
         DeviceType::Net
+    }
+
+    fn irq_number(&self) -> Option<u32> {
+        None
     }
 }
 
@@ -468,13 +485,12 @@ impl NetDriverOps for GmacNic {
         // Get buffer info
         let buf_ptr = tx_buf.packet().as_ptr();
         let buf_len = tx_buf.packet_len();
-        let buf_paddr = KernelFunc::virt_to_phys(buf_ptr as usize) as u32;
+        let buf_paddr =
+            crate_interface::call_interface!(KernelFunc::virt_to_phys(buf_ptr as usize)) as u32;
 
         trace!(
             "GMAC: TX packet: idx={}, len={}, paddr={:#x}",
-            self.tx_head,
-            buf_len,
-            buf_paddr
+            self.tx_head, buf_len, buf_paddr
         );
 
         // Setup descriptor for transmission
@@ -543,18 +559,16 @@ impl NetDriverOps for GmacNic {
             frame_len
         };
 
-        trace!(
-            "GMAC: RX packet: idx={}, len={}",
-            self.rx_cur,
-            packet_len
-        );
+        trace!("GMAC: RX packet: idx={}, len={}", self.rx_cur, packet_len);
 
         // Get old buffer
         let mut old_buf = self.rx_buffers[self.rx_cur].take().unwrap();
 
         // Allocate new buffer for this descriptor
         let new_buf = self.rx_buf_pool.alloc_boxed().ok_or(DevError::NoMemory)?;
-        let new_buf_paddr = KernelFunc::virt_to_phys(new_buf.raw_buf().as_ptr() as usize) as u32;
+        let new_buf_paddr = crate_interface::call_interface!(KernelFunc::virt_to_phys(
+            new_buf.raw_buf().as_ptr() as usize
+        )) as u32;
 
         // Get next descriptor address from current descriptor
         let next_desc = desc.rdes3;
@@ -596,14 +610,14 @@ impl Drop for GmacNic {
         regs.clear_bits(MAC_CONFIGURATION, MAC_CONFIG_TE | MAC_CONFIG_RE);
 
         // Free descriptor rings
-        KernelFunc::dma_free_coherent(
+        crate_interface::call_interface!(KernelFunc::dma_free_coherent(
             self.tx_desc_ring.as_ptr() as usize,
-            self.tx_desc_pages,
-        );
-        KernelFunc::dma_free_coherent(
+            self.tx_desc_pages
+        ));
+        crate_interface::call_interface!(KernelFunc::dma_free_coherent(
             self.rx_desc_ring.as_ptr() as usize,
-            self.rx_desc_pages,
-        );
+            self.rx_desc_pages
+        ));
 
         info!("GMAC: Driver cleanup completed");
     }

@@ -4,7 +4,7 @@
 //! for the Synopsys DesignWare Ethernet MAC 4.20a.
 //!
 //! Both TX and RX descriptors are 32 bytes (8 x u32) with 8-byte alignment.
-
+#![allow(unused)]
 /// TX DMA Descriptor (Enhanced mode, 32 bytes)
 #[repr(C, align(8))]
 #[derive(Debug, Clone, Copy)]
