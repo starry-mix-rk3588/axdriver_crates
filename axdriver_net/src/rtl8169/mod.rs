@@ -46,6 +46,9 @@ pub trait KernelFunc {
 
     /// Free DMA-coherent memory
     fn dma_free_coherent(vaddr: usize, pages: usize);
+
+    /// Get current system ticks (for timeouts)
+    fn get_system_ticks() -> u64;
 }
 
 /// Configuration constants
@@ -273,6 +276,11 @@ impl Rtl8169Nic {
         crate_interface::call_interface!(KernelFunc::dma_free_coherent(vaddr, pages));
     }
 
+    /// Get current system ticks (for timeouts)
+    fn get_system_ticks() -> u64 {
+        crate_interface::call_interface!(KernelFunc::get_system_ticks())
+    }
+
     /// Configure hardware registers
     fn configure_hardware(
         regs: &Rtl8169Regs,
@@ -457,9 +465,9 @@ impl NetDriverOps for Rtl8169Nic {
         self.regs.write8(Reg::TxPoll, 0x40);
 
         // Wait for transmission to complete (polling mode)
-        let start = Self::get_ticks();
+        let start = Self::get_system_ticks();
         while self.tx_desc_ring[idx].is_owned() {
-            if Self::get_ticks() - start > TX_TIMEOUT_MS {
+            if Self::get_system_ticks() - start > TX_TIMEOUT_MS as u64 {
                 error!("RTL8169: TX timeout");
                 return Err(DevError::Io);
             }
@@ -512,15 +520,3 @@ impl NetDriverOps for Rtl8169Nic {
     }
 }
 
-impl Rtl8169Nic {
-    /// Get current tick count (simplified - just use spin loop counter)
-    fn get_ticks() -> usize {
-        // Simple counter-based timeout
-        // In real implementation, should use platform timer
-        static mut COUNTER: usize = 0;
-        unsafe {
-            COUNTER = COUNTER.wrapping_add(1);
-            COUNTER
-        }
-    }
-}
