@@ -6,15 +6,9 @@
 #[cfg(feature = "fxmac")]
 /// fxmac driver for PhytiumPi
 pub mod fxmac;
-#[cfg(feature = "gmac")]
-/// GMAC driver for RK3588
-pub mod gmac;
 #[cfg(feature = "ixgbe")]
 /// ixgbe NIC device driver.
 pub mod ixgbe;
-#[cfg(feature = "rtl8169")]
-/// RTL8169 PCI Gigabit Ethernet driver
-pub mod rtl8169;
 mod net_buf;
 
 use core::ptr::NonNull;

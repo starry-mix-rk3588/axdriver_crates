@@ -15,8 +15,6 @@ categories.workspace = true
 default = []
 ixgbe = ["dep:ixgbe-driver"]
 fxmac = ["dep:fxmac_rs"]
-gmac = []
-rtl8169 = []
 
 [dependencies]
 spin = "0.9"
