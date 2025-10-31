@@ -47,59 +47,94 @@ impl Rtl8139Driver {
 
     /// Initialize the RTL8139 hardware
     pub fn init(&mut self) -> DevResult {
-        log::info!("Initializing RTL8139 at {:#x}", self.base_addr);
+        log::info!("[RTL8139] Initializing at {:#x}", self.base_addr);
 
-        // Power on the device
+        // Step 1: Power on the device
+        log::debug!("[RTL8139] Step 1: Power on device (CONFIG1 = 0x00)");
         self.write_reg8(CONFIG1, 0x00);
 
-        // Software reset
+        // Step 2: Software reset
+        log::debug!("[RTL8139] Step 2: Performing software reset");
         self.software_reset()?;
 
-        // Allocate receive buffer
+        // Step 3: Allocate receive buffer
+        log::debug!("[RTL8139] Step 3: Allocating RX buffer (size: {})", RX_BUF_SIZE);
         let rx_pages = (RX_BUF_SIZE + 4095) / 4096;
         let (rx_vaddr, rx_paddr) = KF::dma_alloc_coherent(rx_pages);
         if rx_vaddr == 0 {
-            log::error!("Failed to allocate RX buffer");
+            log::error!("[RTL8139] Failed to allocate RX buffer");
             return Err(DevError::NoMemory);
         }
         self.rx_buf_vaddr = rx_vaddr;
         self.rx_buf_paddr = rx_paddr;
+        log::debug!("[RTL8139] RX buffer allocated at vaddr={:#x}, paddr={:#x}", rx_vaddr, rx_paddr);
 
-        // Allocate transmit buffers
+        // Step 4: Allocate transmit buffers
+        log::debug!("[RTL8139] Step 4: Allocating {} TX buffers (size: {})", NUM_TX_DESC, TX_BUF_SIZE);
         let tx_pages = (TX_BUF_SIZE + 4095) / 4096;
         for i in 0..NUM_TX_DESC {
             let (tx_vaddr, tx_paddr) = KF::dma_alloc_coherent(tx_pages);
             if tx_vaddr == 0 {
-                log::error!("Failed to allocate TX buffer {}", i);
+                log::error!("[RTL8139] Failed to allocate TX buffer {}", i);
                 return Err(DevError::NoMemory);
             }
             self.tx_buf_vaddr[i] = tx_vaddr;
             self.tx_buf_paddr[i] = tx_paddr;
-
-            // Set transmit address in TSAD register
-            self.write_reg32(TSAD0 + (i as u16 * 4), tx_paddr as u32);
+            log::debug!("[RTL8139] TX buffer {} allocated at vaddr={:#x}, paddr={:#x}", i, tx_vaddr, tx_paddr);
         }
 
-        // Set receive buffer address
+        // Step 5: Enable Tx/Rx (before configuration)
+        log::debug!("[RTL8139] Step 5: Enabling Tx/Rx");
+        let cmd_val = (self.read_reg8(CR) & !0x1C) | CR_TE | CR_RE;
+        self.write_reg8(CR, cmd_val);
+        log::debug!("[RTL8139] CMD register = {:#x}", self.read_reg8(CR));
+
+        // Step 6: Configure TCR (Transmit Configuration)
+        // TCR: DMA burst size = 1024 bytes (6 << 8), normal IFG (3 << 24)
+        // Note: Hardware may set additional version/reserved bits
+        let tcr_val = (6 << 8) | (3 << 24);
+        log::debug!("[RTL8139] Step 6: Configuring TCR = {:#x}", tcr_val);
+        self.write_reg32(TCR, tcr_val);
+        let tcr_read = self.read_reg32(TCR);
+        log::debug!("[RTL8139] TCR register = {:#x} (hw may set additional bits)", tcr_read);
+
+        // Step 7: Configure RCR (Receive Configuration)
+        // RCR: Accept all packets (0xF) + WRAP (1<<7) + 64K buffer (1<<11) + max DMA (7<<8)
+        let rcr_val = (1 << 11) | (7 << 8) | (1 << 7) | (1 << 3) | (1 << 2) | (1 << 1) | (1 << 0);
+        log::debug!("[RTL8139] Step 7: Configuring RCR = {:#x}", rcr_val);
+        self.write_reg32(RCR, rcr_val);
+        log::debug!("[RTL8139] RCR register = {:#x}", self.read_reg32(RCR));
+
+        // Step 8: Set transmit addresses in TSAD0-3
+        log::debug!("[RTL8139] Step 8: Setting TX descriptor addresses");
+        for i in 0..NUM_TX_DESC {
+            let tsad_reg = TSAD0 + (i as u16 * 4);
+            self.write_reg32(tsad_reg, self.tx_buf_paddr[i] as u32);
+            log::debug!("[RTL8139] TSAD{} = {:#x}", i, self.read_reg32(tsad_reg));
+        }
+
+        // Step 9: Set receive buffer address (RBSTART)
+        log::debug!("[RTL8139] Step 9: Setting RX buffer address");
         self.write_reg32(RBSTART, self.rx_buf_paddr as u32);
+        log::debug!("[RTL8139] RBSTART = {:#x}", self.read_reg32(RBSTART));
 
-        // Configure interrupts
-        self.write_reg16(IMR, INT_ROK | INT_TOK);
+        // Step 10: Initialize missed packet counter (MPC)
+        log::debug!("[RTL8139] Step 10: Initializing MPC");
+        self.write_reg32(MPC, 0);
+        log::debug!("[RTL8139] MPC = {:#x}", self.read_reg32(MPC));
 
-        // Configure receive: Accept all packets with wrap
-        self.write_reg32(RCR, 0xF | (1 << 7));
+        // Step 11: Configure interrupt mask
+        log::debug!("[RTL8139] Step 11: Configuring interrupts");
+        let imr_val = INT_ROK | INT_TOK | INT_RER | INT_TER | INT_RXOVW;
+        self.write_reg16(IMR, imr_val);
+        log::debug!("[RTL8139] IMR = {:#x}", self.read_reg16(IMR));
 
-        // Configure transmit: Max DMA burst size + normal interframe gap
-        self.write_reg32(TCR, 0x03000700);
-
-        // Enable receiver and transmitter
-        self.write_reg8(CR, CR_RE | CR_TE);
-
-        // Read MAC address
+        // Step 12: Read MAC address
+        log::debug!("[RTL8139] Step 12: Reading MAC address");
         self.read_mac_address();
 
         log::info!(
-            "RTL8139 initialized with MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+            "[RTL8139] Initialized successfully with MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
             self.mac.0[0],
             self.mac.0[1],
             self.mac.0[2],
@@ -108,23 +143,32 @@ impl Rtl8139Driver {
             self.mac.0[5]
         );
 
+        // Verify critical registers
+        log::debug!("[RTL8139] Final register status:");
+        log::debug!("[RTL8139]   CR  = {:#x}", self.read_reg8(CR));
+        log::debug!("[RTL8139]   TCR = {:#x}", self.read_reg32(TCR));
+        log::debug!("[RTL8139]   RCR = {:#x}", self.read_reg32(RCR));
+        log::debug!("[RTL8139]   IMR = {:#x}", self.read_reg16(IMR));
+
         Ok(())
     }
 
     /// Perform software reset
     fn software_reset(&self) -> DevResult {
+        log::debug!("[RTL8139] Initiating software reset (CR_RST)");
         self.write_reg8(CR, CR_RST);
 
         let mut timeout = 1000;
         while (self.read_reg8(CR) & CR_RST) != 0 {
             if timeout == 0 {
-                log::error!("RTL8139 reset timeout");
+                log::error!("[RTL8139] Reset timeout - CR still has RST bit set");
                 return Err(DevError::BadState);
             }
             timeout -= 1;
-            KF::busy_wait_us(10);
+            KF::busy_wait(core::time::Duration::from_micros(100));
         }
 
+        log::debug!("[RTL8139] Software reset completed successfully");
         Ok(())
     }
 
@@ -186,6 +230,7 @@ impl Rtl8139Driver {
     /// Transmit a packet
     fn do_transmit(&mut self, data: &[u8]) -> DevResult {
         if data.len() > TX_BUF_SIZE {
+            log::warn!("[RTL8139] TX packet too large: {} > {}", data.len(), TX_BUF_SIZE);
             return Err(DevError::InvalidParam);
         }
 
@@ -195,6 +240,7 @@ impl Rtl8139Driver {
         let status = self.read_reg32(TSD0 + (idx as u16 * 4));
         if (status & (TSD_OWN | TSD_TOK)) == 0 {
             // Not completed yet
+            log::debug!("[RTL8139] TX desc[{}] not available, status={:#x}", idx, status);
             return Err(DevError::Again);
         }
 
@@ -207,12 +253,15 @@ impl Rtl8139Driver {
         // Pad to minimum Ethernet frame size if needed
         let len = core::cmp::max(data.len(), MIN_ETH_FRAME_SIZE);
 
+        log::debug!("[RTL8139] TX desc[{}]: len={}, TSD offset={:#x}", idx, len, TSD0 + (idx as u16 * 4));
+
         // Start transmission by writing length to TSD register
         self.write_reg32(TSD0 + (idx as u16 * 4), len as u32);
 
         // Move to next descriptor
         self.tx_cur = (self.tx_cur + 1) % NUM_TX_DESC;
 
+        log::debug!("[RTL8139] TX triggered, next descriptor: {}", self.tx_cur);
         Ok(())
     }
 
@@ -226,6 +275,8 @@ impl Rtl8139Driver {
         let rx_buf = self.rx_buf_vaddr;
         let cur_rx = self.cur_rx;
 
+        log::debug!("[RTL8139] RX: cur_rx={:#x}, CR={:#x}", cur_rx, self.read_reg8(CR));
+
         unsafe {
             // Read packet status and length (first 4 bytes)
             let header_ptr = (rx_buf + cur_rx) as *const u32;
@@ -233,9 +284,12 @@ impl Rtl8139Driver {
             let status = (header & 0xFFFF) as u16;
             let total_len = (header >> 16) as usize;
 
+            log::debug!("[RTL8139] RX: status={:#x}, total_len={}", status, total_len);
+
             // Check receive OK status
             if (status & 0x01) == 0 {
                 // Invalid packet, skip it
+                log::warn!("[RTL8139] RX: invalid packet, status={:#x}", status);
                 self.cur_rx = (cur_rx + total_len + 4 + 3) & !3;
                 self.write_reg16(CAPR, (self.cur_rx as u16).wrapping_sub(16));
                 return Err(DevError::Again);
@@ -243,7 +297,7 @@ impl Rtl8139Driver {
 
             // Validate packet length (excluding 4-byte CRC)
             if total_len < 64 || total_len > 1522 {
-                log::warn!("Invalid packet length: {}", total_len);
+                log::warn!("[RTL8139] Invalid packet length: {}", total_len);
                 self.cur_rx = (cur_rx + total_len + 4 + 3) & !3;
                 self.write_reg16(CAPR, (self.cur_rx as u16).wrapping_sub(16));
                 return Err(DevError::BadState);
@@ -252,11 +306,13 @@ impl Rtl8139Driver {
             // Packet length excluding CRC
             let packet_len = total_len - 4;
 
+            log::debug!("[RTL8139] RX: packet_len={} (total={})", packet_len, total_len);
+
             // Allocate buffer for packet
             let pages = (packet_len + 4095) / 4096;
             let (pkt_vaddr, _pkt_paddr) = KF::dma_alloc_coherent(pages);
             if pkt_vaddr == 0 {
-                log::error!("Failed to allocate packet buffer");
+                log::error!("[RTL8139] Failed to allocate packet buffer");
                 return Err(DevError::NoMemory);
             }
 
@@ -272,17 +328,24 @@ impl Rtl8139Driver {
 
             // Wrap around if needed
             if self.cur_rx >= RX_BUF_SIZE {
+                log::debug!("[RTL8139] RX buffer wrap: {} -> {}", self.cur_rx, self.cur_rx % RX_BUF_SIZE);
                 self.cur_rx = self.cur_rx % RX_BUF_SIZE;
             }
 
             // Update CAPR register (minus 16 to avoid overflow)
-            self.write_reg16(CAPR, (self.cur_rx as u16).wrapping_sub(16));
+            let capr_val = (self.cur_rx as u16).wrapping_sub(16);
+            self.write_reg16(CAPR, capr_val);
+            log::debug!("[RTL8139] RX: updated CAPR={:#x}, next cur_rx={:#x}", capr_val, self.cur_rx);
 
             let raw_ptr = NonNull::new(pkt_vaddr as *mut u8).unwrap();
             let buf_ptr = raw_ptr;
 
             Ok(NetBufPtr::new(raw_ptr, buf_ptr, packet_len))
         }
+    }
+
+    pub fn irq_number(&self) -> u8 {
+        self.irq
     }
 }
 

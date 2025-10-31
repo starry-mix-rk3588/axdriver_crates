@@ -24,8 +24,8 @@ pub trait KernelFunc {
     /// Get current time in microseconds
     fn get_time_us() -> u64;
 
-    /// Busy wait for specified microseconds
-    fn busy_wait_us(us: u64);
+    /// Busy wait for specified duration
+    fn busy_wait(duration: core::time::Duration);
 }
 
 /// Wrapper struct for kernel function calls
@@ -35,13 +35,13 @@ impl UseKernelFunc {
     /// Convert virtual address to physical address
     #[inline]
     pub fn virt_to_phys(addr: usize) -> usize {
-        crate_interface::call_interface!(super::KernelFunc::virt_to_phys(addr))
+        crate_interface::call_interface!(KernelFunc::virt_to_phys(addr))
     }
 
     /// Convert physical address to virtual address
     #[inline]
     pub fn phys_to_virt(addr: usize) -> usize {
-        crate_interface::call_interface!(super::KernelFunc::phys_to_virt(addr))
+        crate_interface::call_interface!(KernelFunc::phys_to_virt(addr))
     }
 
     /// Allocate DMA coherent memory
@@ -50,24 +50,24 @@ impl UseKernelFunc {
     /// (virtual_address, physical_address)
     #[inline]
     pub fn dma_alloc_coherent(pages: usize) -> (usize, usize) {
-        crate_interface::call_interface!(super::KernelFunc::dma_alloc_coherent(pages))
+        crate_interface::call_interface!(KernelFunc::dma_alloc_coherent(pages))
     }
 
     /// Free DMA coherent memory
     #[inline]
     pub fn dma_free_coherent(vaddr: usize, pages: usize) {
-        crate_interface::call_interface!(super::KernelFunc::dma_free_coherent(vaddr, pages))
+        crate_interface::call_interface!(KernelFunc::dma_free_coherent(vaddr, pages))
     }
 
     /// Get current time in microseconds
     #[inline]
     pub fn get_time_us() -> u64 {
-        crate_interface::call_interface!(super::KernelFunc::get_time_us())
+        crate_interface::call_interface!(KernelFunc::get_time_us())
     }
 
-    /// Busy wait for specified microseconds
+    /// Busy wait for specified duration
     #[inline]
-    pub fn busy_wait_us(us: u64) {
-        crate_interface::call_interface!(super::KernelFunc::busy_wait_us(us))
+    pub fn busy_wait(duration: core::time::Duration) {
+        crate_interface::call_interface!(KernelFunc::busy_wait(duration))
     }
 }

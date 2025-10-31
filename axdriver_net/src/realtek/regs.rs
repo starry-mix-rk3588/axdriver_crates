@@ -25,6 +25,7 @@ pub mod rtl8139 {
     pub const MPC: u16 = 0x4C; // Missed Packet Counter
     pub const CONFIG1: u16 = 0x52; // Configuration Register 1
     pub const CONFIG4: u16 = 0x5A; // Configuration Register 4
+    pub const MULINT: u16 = 0x5C; // Multiple Interrupt Select
 
     // Command Register bits
     pub const CR_RST: u8 = 1 << 4; // Reset
@@ -38,8 +39,10 @@ pub mod rtl8139 {
     pub const INT_TOK: u16 = 1 << 2; // Transmit OK
     pub const INT_TER: u16 = 1 << 3; // Transmit Error
     pub const INT_RXOVW: u16 = 1 << 4; // Rx Buffer Overflow
-    pub const INT_PUN: u16 = 1 << 5; // Packet Underrun
+    pub const INT_PUN: u16 = 1 << 5; // Packet Underrun / Link Change
     pub const INT_FOVW: u16 = 1 << 6; // Rx FIFO Overflow
+    pub const INT_LENCHG: u16 = 1 << 13; // Cable Length Change
+    pub const INT_TIMEOUT: u16 = 1 << 14; // Time Out
     pub const INT_SERR: u16 = 1 << 15; // System Error
 
     // Transmit Status Register bits
@@ -50,6 +53,22 @@ pub mod rtl8139 {
     pub const TSD_OWC: u32 = 1 << 29; // Out of Window Collision
     pub const TSD_TABT: u32 = 1 << 30; // Transmit Abort
     pub const TSD_CRS: u32 = 1 << 31; // Carrier Sense Lost
+
+    // Receive Configuration Register bits
+    pub const RCR_AAP: u32 = 1 << 0; // Accept All Packets
+    pub const RCR_APM: u32 = 1 << 1; // Accept Physical Match
+    pub const RCR_AM: u32 = 1 << 2; // Accept Multicast
+    pub const RCR_AB: u32 = 1 << 3; // Accept Broadcast
+    pub const RCR_AR: u32 = 1 << 4; // Accept Runt
+    pub const RCR_AER: u32 = 1 << 5; // Accept Error
+    pub const RCR_WRAP: u32 = 1 << 7; // Wrap
+    pub const RCR_MXDMA_SHIFT: u32 = 8; // Max DMA Burst Size shift
+    pub const RCR_RBLEN_SHIFT: u32 = 11; // RX Buffer Length shift
+    pub const RCR_RXFTH_SHIFT: u32 = 13; // RX FIFO Threshold shift
+
+    // Transmit Configuration Register bits
+    pub const TCR_MXDMA_SHIFT: u32 = 8; // Max DMA Burst Size shift
+    pub const TCR_IFG_SHIFT: u32 = 24; // Inter-frame Gap shift
 }
 
 /// RTL8169/8168/8111 register offsets
@@ -123,12 +142,15 @@ pub mod rtl8169 {
     pub const RCR_AR: u32 = 1 << 4; // Accept Runt
     pub const RCR_AER: u32 = 1 << 5; // Accept Error
     pub const RCR_WRAP: u32 = 1 << 7; // Wrap (for RTL8139 compatibility)
-    pub const RCR_MXDMA_UNLIMITED: u32 = 7 << 8; // Max DMA Burst Size
+    pub const RCR_MXDMA_UNLIMITED: u32 = 7 << 8; // Max DMA Burst Size (unlimited)
     pub const RCR_RXFTH_NONE: u32 = 7 << 13; // Rx FIFO Threshold (no threshold)
+    pub const RCR_RXFTH_64: u32 = 2 << 13; // Rx FIFO Threshold (64 bytes)
+    pub const RCR_MERINT: u32 = 1 << 24; // Multiple Early Interrupt
 
     // Transmit Configuration Register bits
-    pub const TCR_MXDMA_UNLIMITED: u32 = 7 << 8; // Max DMA Burst Size
-    pub const TCR_IFG_NORMAL: u32 = 3 << 24; // Inter-frame Gap
+    pub const TCR_MXDMA_UNLIMITED: u32 = 7 << 8; // Max DMA Burst Size (unlimited)
+    pub const TCR_IFG_NORMAL: u32 = 3 << 24; // Inter-frame Gap (normal)
+    pub const TCR_LOOPBACK: u32 = 3 << 17; // Loopback mode
 }
 
 /// Descriptor format for RTL8169/8168/8111
