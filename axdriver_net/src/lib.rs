@@ -9,6 +9,10 @@ pub mod fxmac;
 #[cfg(feature = "ixgbe")]
 /// ixgbe NIC device driver.
 pub mod ixgbe;
+#[cfg(feature = "realtek")]
+/// RealTek RTL8139/RTL8169/RTL8168/RTL8111 NIC device driver.
+pub mod realtek;
+
 mod net_buf;
 
 use core::ptr::NonNull;
@@ -19,6 +23,7 @@ pub use axdriver_base::{BaseDriverOps, DevError, DevResult, DeviceType};
 pub use self::net_buf::{NetBuf, NetBufBox, NetBufPool};
 
 /// The ethernet address of the NIC (MAC address).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EthernetAddress(pub [u8; 6]);
 
 /// Operations that require a network device (NIC) driver to implement.
