@@ -69,10 +69,23 @@ pub mod rtl8139 {
     // Transmit Configuration Register bits
     pub const TCR_MXDMA_SHIFT: u32 = 8; // Max DMA Burst Size shift
     pub const TCR_IFG_SHIFT: u32 = 24; // Inter-frame Gap shift
+
+    // Receive Status bits (in buffer header)
+    pub const RX_ROK: u16 = 1 << 0; // Receive OK
+    pub const RX_FAE: u16 = 1 << 1; // Frame Alignment Error
+    pub const RX_CRC: u16 = 1 << 2; // CRC Error
+    pub const RX_LONG: u16 = 1 << 3; // Long Packet
+    pub const RX_RUNT: u16 = 1 << 4; // Runt Packet
+    pub const RX_ISE: u16 = 1 << 5; // Invalid Symbol Error
+    pub const RX_BAR: u16 = 1 << 13; // Broadcast Address Received
+    pub const RX_PAM: u16 = 1 << 14; // Physical Address Matched
+    pub const RX_MAR: u16 = 1 << 15; // Multicast Address Received
 }
 
 /// RTL8169/8168/8111 register offsets
 pub mod rtl8169 {
+    // Re-export MAC address registers for consistency
+    pub const IDR0: u16 = 0x00; // MAC address (same as MAC0)
     pub const MAC0: u16 = 0x00; // MAC address
     pub const MAC4: u16 = 0x04; // MAC address (continued)
     pub const MAR0: u16 = 0x08; // Multicast filter
@@ -155,11 +168,17 @@ pub mod rtl8169 {
 
 /// Descriptor format for RTL8169/8168/8111
 pub mod descriptor {
-    // RX Descriptor opts1 bits
-    pub const RX_OWN: u32 = 1 << 31; // Ownership (1 = NIC, 0 = CPU)
-    pub const RX_EOR: u32 = 1 << 30; // End of Ring
-    pub const RX_FS: u32 = 1 << 29; // First Segment
-    pub const RX_LS: u32 = 1 << 28; // Last Segment
+    // Common descriptor bits
+    pub const DESC_OWN: u32 = 1 << 31; // Ownership (1 = NIC, 0 = CPU)
+    pub const DESC_EOR: u32 = 1 << 30; // End of Ring
+    pub const DESC_FS: u32 = 1 << 29; // First Segment
+    pub const DESC_LS: u32 = 1 << 28; // Last Segment
+
+    // RX Descriptor opts1 bits (aliases for common use)
+    pub const RX_OWN: u32 = DESC_OWN;
+    pub const RX_EOR: u32 = DESC_EOR;
+    pub const RX_FS: u32 = DESC_FS;
+    pub const RX_LS: u32 = DESC_LS;
     pub const RX_MAR: u32 = 1 << 26; // Multicast Address Received
     pub const RX_PAM: u32 = 1 << 25; // Physical Address Matched
     pub const RX_BAR: u32 = 1 << 24; // Broadcast Address Received
@@ -173,6 +192,13 @@ pub mod descriptor {
     pub const RX_UDPF: u32 = 1 << 15; // UDP Checksum Failure
     pub const RX_TCPF: u32 = 1 << 14; // TCP Checksum Failure
     pub const RX_LEN_MASK: u32 = 0x3FFF; // Frame Length
+
+    // Aliases for error checking (DESC_RX_xxx)
+    pub const DESC_RX_RES: u32 = RX_RES;
+    pub const DESC_RX_RWMA: u32 = RX_MAR;  // Watchdog timeout (use MAR as placeholder)
+    pub const DESC_RX_RWT: u32 = RX_RWT;
+    pub const DESC_RX_RUNT: u32 = RX_RUNT;
+    pub const DESC_RX_LONG: u32 = 1 << 17; // Long Packet
 
     // TX Descriptor opts1 bits
     pub const TX_OWN: u32 = 1 << 31; // Ownership (1 = NIC, 0 = CPU)
