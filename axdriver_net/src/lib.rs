@@ -12,8 +12,9 @@ pub mod ixgbe;
 #[cfg(feature = "realtek")]
 /// RealTek RTL8139/RTL8169/RTL8168/RTL8111 NIC device driver.
 pub mod realtek;
-
+extern crate alloc;
 mod net_buf;
+mod netstack;
 
 use core::ptr::NonNull;
 
