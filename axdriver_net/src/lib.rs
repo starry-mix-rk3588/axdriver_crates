@@ -14,7 +14,6 @@ pub mod ixgbe;
 pub mod realtek;
 extern crate alloc;
 mod net_buf;
-mod netstack;
 
 use core::ptr::NonNull;
 

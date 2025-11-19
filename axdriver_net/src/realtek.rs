@@ -4,15 +4,15 @@ use alloc::vec::Vec;
 use axdriver_base::{BaseDriverOps, DevError, DevResult, DeviceType};
 use core::ptr::NonNull;
 use log::*;
-use realtek_drivers::rtl8125::Rtl8125;
+use realtek_drivers::rtl8169::Rtl8169;
 
 use crate::NetDriverOps;
-pub use realtek_drivers::KernelFunc;
+pub use realtek_drivers::{KernelFunc, UseKernelFunc};
 
 const RX_QUEUE_SIZE: usize = 64;
 
 pub struct RealtekNic {
-    inner: Rtl8125,
+    inner: Rtl8169,
     rx_buffer_queue: VecDeque<crate::NetBufPtr>,
 }
 
@@ -20,8 +20,8 @@ unsafe impl Sync for RealtekNic {}
 unsafe impl Send for RealtekNic {}
 
 impl RealtekNic {
-    pub fn init(mmio_phys: usize) -> DevResult<Self> {
-        info!("RealtekNic init @ {:#x}", mmio_phys);
+    pub fn init(mmio_virt: usize) -> DevResult<Self> {
+        info!("RealtekNic init @ {:#x}", mmio_virt);
         let rx_buffer_queue = VecDeque::with_capacity(RX_QUEUE_SIZE);
 
         // let inner = Rtl8125::new(mmio_phys.into());
@@ -30,8 +30,9 @@ impl RealtekNic {
 
         // crate::netstack::test_ping(inner, local_ip);
 
-        let mut inner = Rtl8125::new(mmio_phys.into());
-        inner.init().map_err(|_| DevError::BadState)?;
+        let mut inner = Rtl8169::new(mmio_virt.into(), 0x8125);
+        inner.eth_probe();
+        inner.eth_start();
 
         let dev = Self {
             inner,
@@ -70,7 +71,7 @@ impl NetDriverOps for RealtekNic {
     }
 
     fn tx_queue_size(&self) -> usize {
-        1
+        RX_QUEUE_SIZE
     }
 
     fn recycle_rx_buffer(&mut self, rx_buf: crate::NetBufPtr) -> DevResult {
@@ -86,7 +87,7 @@ impl NetDriverOps for RealtekNic {
     }
 
     fn transmit(&mut self, tx_buf: crate::NetBufPtr) -> DevResult {
-        self.inner.send(tx_buf.packet()).unwrap();
+        self.inner.eth_send(tx_buf.packet(), tx_buf.packet_len());
         Ok(())
     }
 
@@ -97,25 +98,25 @@ impl NetDriverOps for RealtekNic {
         } else {
             // Try to receive new packet from hardware
             let mut xbuf = [0u8; 1536];
-            match self.inner.recv(&mut xbuf) {
-                Ok(len) => {
-                    debug!("received packet length {}", len);
-                    // Create a Vec with actual received length
-                    let packet = xbuf[..len].to_vec();
-                    let mut buf = Box::new(packet);
-                    let buf_ptr = buf.as_mut_ptr() as *mut u8;
-                    let buf_len = buf.len();
+            let recv_len = self.inner.eth_recv(&mut xbuf) as usize;
+            if recv_len > 0 {
+                debug!("received packet length {}", recv_len);
+                // Create a Vec with actual received length
+                let packet = xbuf[..recv_len].to_vec();
+                let mut buf = Box::new(packet);
+                let buf_ptr = buf.as_mut_ptr() as *mut u8;
+                let buf_len = buf.len();
 
-                    let rx_buf = crate::NetBufPtr::new(
-                        NonNull::new(Box::into_raw(buf) as *mut u8).unwrap(),
-                        NonNull::new(buf_ptr).unwrap(),
-                        buf_len,
-                    );
+                let rx_buf = crate::NetBufPtr::new(
+                    NonNull::new(Box::into_raw(buf) as *mut u8).unwrap(),
+                    NonNull::new(buf_ptr).unwrap(),
+                    buf_len,
+                );
 
-                    self.rx_buffer_queue.push_back(rx_buf);
-                    Ok(self.rx_buffer_queue.pop_front().unwrap())
-                }
-                Err(_) => Err(DevError::Again),
+                self.rx_buffer_queue.push_back(rx_buf);
+                Ok(self.rx_buffer_queue.pop_front().unwrap())
+            } else {
+                Err(DevError::Again)
             }
         }
     }
