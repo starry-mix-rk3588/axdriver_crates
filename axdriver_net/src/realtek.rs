@@ -44,7 +44,7 @@ impl RealtekNic {
 
 impl BaseDriverOps for RealtekNic {
     fn device_name(&self) -> &str {
-        "cdns,phytium-gem-1.0"
+        "realtek-nic"
     }
 
     fn device_type(&self) -> DeviceType {
